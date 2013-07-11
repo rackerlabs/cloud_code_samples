@@ -27,7 +27,7 @@ This script is intended to test that placing resolv.conf after server is in Acti
 ========
 This script will 
 -create a server based on an image with the configurable value of imgname
--add a public key to the server given the configurable value of keyfile
+-add a public key to the server given the an existing public key in: ~/.ssh/id_rsa.pub
 -out puts the server information as well as the contents of the resolv.conf file and the last lines of nova-agent.log
 '''
 
@@ -42,15 +42,14 @@ myimage = [img for img in cs.images.list()
 myflavor = [flavor for flavor in cs.flavors.list()
                 if flavor.ram == size][0]
 
-keyfile = os.path.expanduser('~/pubkey')
-
-keyfileobj = open(keyfile, 'r')
+keyfile = os.path.expanduser("~/.ssh/id_rsa.pub")
+with open(keyfile, "r") as kf:
+    key = cs.keypairs.create("my_key", kf.read())
 
 resolvfile = os.path.expanduser('~/somedir/resolv')
-files = {'/root/.ssh/authorized_keys': keyfileobj}
 
 server_name='test1'
-server = cs.servers.create(server_name, myimage.id, myflavor.id, files=files)
+server = cs.servers.create(server_name, myimage.id, myflavor.id, key_name="my_key")
 print "Name:", server.name
 print "ID:", server.id
 print "Status:", server.status
@@ -60,6 +59,7 @@ print "Waiting for Network config.."
 while not cs.servers.get(server.id).networks:
   time.sleep(1)
 
+
 mypubipv4 = [ ip for ip in cs.servers.get(server).networks['public']
                 if len( ip.split(".") ) == 4 ]
 mypubipv4 = str(mypubipv4[0])
@@ -67,8 +67,9 @@ print "Networks:", mypubipv4
 
 
 print "waiting for active status"
-while not "ACTIVE" in cs.servers.get(server.id).status:
-  time.sleep(1)
+
+new_server = pyrax.utils.wait_until(server, "status", 
+        ["ACTIVE", "ERROR"], attempts=0)
 
 print "rsyncing file"
 os.system("rsync -avrz -e 'ssh -o StrictHostKeyChecking=no' " + resolvfile + " root@" + mypubipv4 + ":/etc/resolv.conf")
